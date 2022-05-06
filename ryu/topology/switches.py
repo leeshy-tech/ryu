@@ -250,6 +250,7 @@ class PortData(object):
         self.lldp_data = lldp_data
         self.timestamp = None
         self.sent = 0
+        self.delay = 0
 
     def lldp_sent(self):
         self.timestamp = time.time()
@@ -1018,3 +1019,70 @@ class Switches(app_manager.RyuApp):
 
         rep = event.EventHostReply(req.src, dpid, hosts)
         self.reply_to_request(req, rep)
+        
+    @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
+    def packet_in_handler(self, ev):
+        recv_timestamp = time.time()
+        if not self.link_discovery:
+            return
+
+        msg = ev.msg
+        try:
+            src_dpid, src_port_no = LLDPPacket.lldp_parse(msg.data)
+        except LLDPPacket.LLDPUnknownFormat as e:
+            # This handler can receive all the packtes which can be
+            # not-LLDP packet. Ignore it silently
+            return
+
+        dst_dpid = msg.datapath.id
+        if msg.datapath.ofproto.OFP_VERSION == ofproto_v1_0.OFP_VERSION:
+            dst_port_no = msg.in_port
+        elif msg.datapath.ofproto.OFP_VERSION >= ofproto_v1_2.OFP_VERSION:
+            dst_port_no = msg.match['in_port']
+        else:
+            LOG.error('cannot accept LLDP. unsupported version. %x',
+                      msg.datapath.ofproto.OFP_VERSION)
+
+        # get the lldp delay
+        for port in self.ports.keys():
+            if src_dpid == port.dpid and src_port_no == port.port_no:
+                send_timestamp = self.ports[port].timestamp
+                if send_timestamp:
+                    self.ports[port].delay = recv_timestamp - send_timestamp
+
+        src = self._get_port(src_dpid, src_port_no)
+        if not src or src.dpid == dst_dpid:
+            return
+        try:
+            self.ports.lldp_received(src)
+        except KeyError:
+            # There are races between EventOFPPacketIn and
+            # EventDPPortAdd. So packet-in event can happend before
+            # port add event. In that case key error can happend.
+            # LOG.debug('lldp_received: KeyError %s', e)
+            pass
+
+        dst = self._get_port(dst_dpid, dst_port_no)
+        if not dst:
+            return
+
+        old_peer = self.links.get_peer(src)
+        # LOG.debug("Packet-In")
+        # LOG.debug("  src=%s", src)
+        # LOG.debug("  dst=%s", dst)
+        # LOG.debug("  old_peer=%s", old_peer)
+        if old_peer and old_peer != dst:
+            old_link = Link(src, old_peer)
+            self.send_event_to_observers(event.EventLinkDelete(old_link))
+
+        link = Link(src, dst)
+        if link not in self.links:
+            self.send_event_to_observers(event.EventLinkAdd(link))
+
+        if not self.links.update_link(src, dst):
+            # reverse link is not detected yet.
+            # So schedule the check early because it's very likely it's up
+            self.ports.move_front(dst)
+            self.lldp_event.set()
+        if self.explicit_drop:
+            self._drop_packet(msg)
