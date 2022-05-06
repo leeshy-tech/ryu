@@ -204,7 +204,7 @@ class NetworkAwareness(app_manager.RyuApp):
 
         # Find ksp in graph.
         for src in _graph.nodes():
-            paths.setdefault(src, {src: [[src] for i in xrange(k)]})
+            paths.setdefault(src, {src: [[src] for i in range(k)]})
             for dst in _graph.nodes():
                 if src == dst:
                     continue
