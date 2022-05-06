@@ -129,7 +129,7 @@ class NetworkMonitor(app_manager.RyuApp):
         _len = len(path)
         if _len > 1:
             minimal_band_width = min_bw
-            for i in xrange(_len-1):
+            for i in range(_len-1):
                 pre, curr = path[i], path[i+1]
                 if 'bandwidth' in graph[pre][curr]:
                     bw = graph[pre][curr]['bandwidth']

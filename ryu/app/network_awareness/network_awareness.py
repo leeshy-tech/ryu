@@ -283,7 +283,7 @@ class NetworkAwareness(app_manager.RyuApp):
                 print ('%10d' % i,end=" ")
             print ("")
             for i in self.graph.nodes():
-                print ('%10d' % i,)
+                print ('%10d' % i,end=" ")
                 for j in self.graph[i].values():
                     print ('%10.0f' % j['weight'],end=" ")
                 print ("")
